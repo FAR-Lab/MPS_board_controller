@@ -47,7 +47,9 @@ bool lastHAL, lastHBL, lastHCL,
      lastHAR, lastHBR, lastHCR;
 
 float leftSpeed = 0; // ticks / second
+float lastLeftSpeed = 0; // ticks / second
 float rightSpeed = 0; // ticks / second
+float lastRightSpeed = 0; // ticks / second
 
 unsigned long lastLeftTick = 0;
 unsigned long lastRightTick = 0;
@@ -92,6 +94,8 @@ void loop() {
   lastHAR = curHAR;
   lastHBR = curHBR;
   lastHCR = curHCR;
+  lastLeftSpeed = leftSpeed;
+  lastRightSpeed = rightSpeed;
 
   if (now > lastPrint + 1000000/5) {
     printData();
@@ -100,28 +104,31 @@ void loop() {
 }
 
 #define MAX_PWM (100)
+#define SPIKE_PWM (50)
+#define LOW_PWM (30)
 
 int targetSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
-float k = 0.002;
+float k = 0.001;
 
-float epsilon = 0.1;
+float epsilon = 0.01;
+
+void setPWM(float &pwm, float &currentSpeed, float &lastSpeed) {
+  if (lastSpeed < epsilon && currentSpeed > epsilon) {
+    pwm = LOW_PWM;
+  } else if (currentSpeed < epsilon) {
+    pwm = SPIKE_PWM;
+  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
+    pwm = constrain(pwm + k * (targetSpeed - currentSpeed), 0, MAX_PWM);
+  }
+}
 
 void setMotorPWM() {
   if (targetSpeed > 0) {
-    if (leftSpeed < -epsilon + (float) targetSpeed) {
-      leftPWM = constrain(leftPWM+k*(targetSpeed-leftSpeed), 0, MAX_PWM);
-    } else if (leftSpeed > epsilon + (float) targetSpeed) {
-      leftPWM = constrain(leftPWM+k*(targetSpeed-leftSpeed), 0, MAX_PWM);
-    }
-
-    if (rightSpeed < -epsilon + (float) targetSpeed) {
-      rightPWM = constrain(rightPWM+k*(targetSpeed-rightSpeed), 0, MAX_PWM);
-    } else if (rightSpeed > epsilon + (float) targetSpeed) {
-      rightPWM = constrain(rightPWM+k*(targetSpeed-rightSpeed), 0, MAX_PWM);
-    }
+    setPWM(leftPWM, leftSpeed, lastLeftSpeed);
+    setPWM(rightPWM, rightSpeed, lastRightSpeed);
   } else {
     leftPWM = rightPWM = 0;
   }
@@ -160,7 +167,12 @@ void serialEvent() {
   }
 
   if (input[0] >= '0' && input[0] <= '9') {
-    targetSpeed = constrain(input.toInt(), 0, 255);
+    int i = input.toInt();
+    if (i < 30) {
+      targetSpeed = 0;
+    } else {
+      targetSpeed = constrain(i, 30, 200);
+    }
     Serial.print("SPEED ");
     Serial.println(targetSpeed);
   }
