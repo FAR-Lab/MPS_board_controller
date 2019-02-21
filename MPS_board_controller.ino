@@ -58,9 +58,15 @@ float updateRate = 0;
 unsigned long lastUpdate = 0;
 unsigned long lastPrint = 0;
 
+unsigned long killTime = 0;
+
 void updateSpeed(float &whichSpeed, unsigned long dt) {
   whichSpeed = 1000000 / dt;
 }
+
+void setMotorPWM();
+void printData();
+void checkKillTime();
 
 void loop() {
   unsigned long now = micros();
@@ -101,13 +107,16 @@ void loop() {
     printData();
     lastPrint = now;
   }
+
+  checkKillTime();
 }
 
 #define MAX_PWM (100)
 #define SPIKE_PWM (50)
 #define LOW_PWM (30)
 
-int targetSpeed = 0;
+int targetLeftSpeed = 0;
+int targetRightSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
@@ -115,7 +124,7 @@ float k = 0.001;
 
 float epsilon = 0.01;
 
-void setPWM(float &pwm, float &currentSpeed, float &lastSpeed) {
+void setPWM(float &pwm, const int &targetSpeed, float &currentSpeed, float &lastSpeed) {
   if (lastSpeed < epsilon && currentSpeed > epsilon) {
     pwm = LOW_PWM;
   } else if (currentSpeed < epsilon) {
@@ -126,9 +135,9 @@ void setPWM(float &pwm, float &currentSpeed, float &lastSpeed) {
 }
 
 void setMotorPWM() {
-  if (targetSpeed > 0) {
-    setPWM(leftPWM, leftSpeed, lastLeftSpeed);
-    setPWM(rightPWM, rightSpeed, lastRightSpeed);
+  if (targetLeftSpeed > 0 || targetRightSpeed > 0) {
+    setPWM(leftPWM, targetLeftSpeed, leftSpeed, lastLeftSpeed);
+    setPWM(rightPWM, targetRightSpeed, rightSpeed, lastRightSpeed);
   } else {
     leftPWM = rightPWM = 0;
   }
@@ -139,6 +148,17 @@ void setMotorPWM() {
 
 void serialEvent() {
   String input = Serial.readStringUntil('\n');
+
+  if (input[0] == ':') {
+    String csv = input.substring(1);
+    csv.trim();
+    int commaIndex = csv.indexOf(",");
+    targetLeftSpeed = csv.substring(0, commaIndex).toInt();
+    targetRightSpeed = csv.substring(commaIndex+1).toInt();
+    killTime = micros() + 250UL*1000UL;
+  } else {
+    killTime = 0;
+  }
 
   if (input[0] == 'f') {
     Serial.println("FORWARD!");
@@ -169,12 +189,18 @@ void serialEvent() {
   if (input[0] >= '0' && input[0] <= '9') {
     int i = input.toInt();
     if (i < 30) {
-      targetSpeed = 0;
+      targetLeftSpeed = targetRightSpeed = 0;
     } else {
-      targetSpeed = constrain(i, 30, 200);
+      targetLeftSpeed = targetRightSpeed = constrain(i, 30, 200);
     }
     Serial.print("SPEED ");
-    Serial.println(targetSpeed);
+    Serial.println(targetLeftSpeed);
+  }
+}
+
+void checkKillTime() {
+  if (killTime > 0 && micros() > killTime) {
+    targetLeftSpeed = targetRightSpeed = 0;
   }
 }
 
