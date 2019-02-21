@@ -103,7 +103,7 @@ void loop() {
   lastLeftSpeed = leftSpeed;
   lastRightSpeed = rightSpeed;
 
-  if (now > lastPrint + 1000000/5) {
+  if (now > lastPrint + 1000000UL/5UL) {
     printData();
     lastPrint = now;
   }
@@ -130,20 +130,24 @@ void setPWM(float &pwm, const int &targetSpeed, float &currentSpeed, float &last
   } else if (currentSpeed < epsilon) {
     pwm = SPIKE_PWM;
   } else if (abs(targetSpeed - currentSpeed) > epsilon) {
-    pwm = constrain(pwm + k * (targetSpeed - currentSpeed), 0, MAX_PWM);
+    pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
   }
 }
 
 void setMotorPWM() {
-  if (targetLeftSpeed > 0 || targetRightSpeed > 0) {
+  if (abs(targetLeftSpeed) > epsilon || abs(targetRightSpeed) > epsilon) {
     setPWM(leftPWM, targetLeftSpeed, leftSpeed, lastLeftSpeed);
     setPWM(rightPWM, targetRightSpeed, rightSpeed, lastRightSpeed);
   } else {
     leftPWM = rightPWM = 0;
   }
 
-  analogWrite(PWM_PIN_L, leftPWM);
-  analogWrite(PWM_PIN_R, rightPWM);
+  analogWrite(PWM_PIN_L, abs(leftPWM));
+  analogWrite(PWM_PIN_R, abs(rightPWM));
+  digitalWrite(DIR_PIN_L, leftPWM < 0 ? HIGH : LOW);
+  digitalWrite(DIR_PIN_R, rightPWM < 0 ? LOW : HIGH);
+  digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
+  digitalWrite(BRAKE_PIN_R, abs(rightPWM) > epsilon ? HIGH : LOW);
 }
 
 void serialEvent() {
