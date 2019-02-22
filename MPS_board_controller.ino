@@ -37,7 +37,8 @@ void setup() {
   digitalWrite(BRAKE_PIN_R, LOW);
 
   // from https://etechnophiles.com/change-frequency-pwm-pins-arduino-uno/
-  TCCR2B = TCCR2B & B11111000 | B00000001; // for PWM frequency of 31372.55 Hz
+  // default is 500
+  // TCCR2B = TCCR2B & B11111000 | B00000001; // for PWM frequency of 31372.55 Hz
   // TCCR2B = TCCR2B & B11111000 | B00000010; // for PWM frequency of 3921.16 Hz
 
   // more info at https://www.arduino.cc/en/Tutorial/SecretsOfArduinoPWM
@@ -60,13 +61,39 @@ unsigned long lastPrint = 0;
 
 unsigned long killTime = 0;
 
-void updateSpeed(float &whichSpeed, unsigned long dt) {
-  whichSpeed = 1000000 / dt;
+void updateSpeed(float &whichSpeed, const unsigned long dt, const int direction) {
+  whichSpeed = direction * 1000000.0 / dt;
 }
 
 void setMotorPWM();
 void printData();
 void checkKillTime();
+
+const int sensorsToPhase[] = {
+  0,
+  2,
+  4,
+  3,
+  6,
+  1,
+  5
+};
+
+int phase(const bool &a, const bool &b, const bool &c) {
+  byte pn = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0);
+  return sensorsToPhase[pn];
+}
+
+int tickDirection(const bool &lastA, const bool &lastB, const bool &lastC,
+  		  const bool &curA, const bool &curB, const bool &curC) {
+  int lastPhase = phase(lastA, lastB, lastC);
+  int curPhase = phase(curA, curB, curC);
+  if (abs(lastPhase-curPhase) <= 1) {
+    return curPhase-lastPhase;
+  } else {
+    return curPhase > lastPhase ? -1 : 1;
+  }
+}
 
 void loop() {
   unsigned long now = micros();
@@ -78,13 +105,15 @@ void loop() {
        curHCR = digitalRead(HCR);
 
   if (curHAL != lastHAL || curHBL != lastHBL || curHCL != lastHCL) {
-    updateSpeed(leftSpeed, now - lastLeftTick);
+    int td = -tickDirection(lastHAL, lastHBL, lastHCL, curHAL, curHBL, curHCL);
+    updateSpeed(leftSpeed, now - lastLeftTick, td);
     lastLeftTick = now;
   } else if (now - lastLeftTick > 100000) {
     leftSpeed = 0;
   }
   if (curHAR != lastHAR || curHBR != lastHBR || curHCR != lastHCR) {
-    updateSpeed(rightSpeed, now - lastRightTick);
+    int td = tickDirection(lastHAR, lastHBR, lastHCR, curHAR, curHBR, curHCR);
+    updateSpeed(rightSpeed, now - lastRightTick, td);
     lastRightTick = now;
   } else if (now - lastRightTick > 100000) {
     rightSpeed = 0;
@@ -111,16 +140,16 @@ void loop() {
   checkKillTime();
 }
 
-#define MAX_PWM (100)
-#define SPIKE_PWM (50)
-#define LOW_PWM (30)
+#define MAX_PWM (160)
+#define SPIKE_PWM (200)
+#define LOW_PWM (120)
 
 int targetLeftSpeed = 0;
 int targetRightSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
-float k = 0.001;
+float k = 0.002;
 
 float epsilon = 0.01;
 
@@ -138,6 +167,8 @@ void setMotorPWM() {
   if (abs(targetLeftSpeed) > epsilon || abs(targetRightSpeed) > epsilon) {
     setPWM(leftPWM, targetLeftSpeed, leftSpeed, lastLeftSpeed);
     setPWM(rightPWM, targetRightSpeed, rightSpeed, lastRightSpeed);
+    // leftPWM = abs(targetLeftSpeed);
+    // rightPWM = abs(targetRightSpeed);
   } else {
     leftPWM = rightPWM = 0;
   }
@@ -195,7 +226,7 @@ void serialEvent() {
     if (i < 30) {
       targetLeftSpeed = targetRightSpeed = 0;
     } else {
-      targetLeftSpeed = targetRightSpeed = constrain(i, 30, 200);
+      targetLeftSpeed = targetRightSpeed = constrain(i, 30, MAX_PWM);
     }
     Serial.print("SPEED ");
     Serial.println(targetLeftSpeed);
