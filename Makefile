@@ -1,4 +1,4 @@
-ARDUINO_LIBS = Wire
+ARDUINO_LIBS = CircularBuffer
 BOARD_TAG    = uno
 MONITOR_PORT = /dev/ttyA*
 
