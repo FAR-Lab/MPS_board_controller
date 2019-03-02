@@ -20,6 +20,17 @@
 //#define MB (A4)
 //#define MC (A3)
 
+typedef byte phase;
+
+struct PhaseTransition {
+  //  byte from;
+  //  byte to;
+  signed char direction;
+  unsigned long time;
+};
+
+typedef CircularBuffer<const PhaseTransition, 5> TickBuffer;
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -51,15 +62,6 @@ bool lastHAL, lastHBL, lastHCL,
 
 float leftSpeed = 0; // ticks / second
 float rightSpeed = 0; // ticks / second
-
-struct PhaseTransition {
-  //  byte from;
-  //  byte to;
-  signed char direction;
-  unsigned long time;
-};
-
-typedef CircularBuffer<const PhaseTransition, 5> TickBuffer;
 
 TickBuffer leftTicks;
 TickBuffer rightTicks;
@@ -93,8 +95,6 @@ void setMotorPWM();
 void printData();
 void checkKillTime();
 
-typedef byte phase;
-
 // based on commutator tables. maps byte from index [HC][HB][HA] to phase number.
 const phase sensorsToPhase[] = {
   0,
@@ -112,7 +112,7 @@ phase phaseOf(const bool &a, const bool &b, const bool &c) {
 }
 
 int tickDirection(const phase &lastPhase, const phase &curPhase, bool invert = false) {
-  if (abs(lastPhase-curPhase) <= 1) {
+  if (abs(lastPhase - curPhase) <= 1) {
     return invert ? lastPhase - curPhase : curPhase - lastPhase;
   } else {
     return (invert ? (lastPhase > curPhase) : (curPhase > lastPhase)) ? -1 : 1;
@@ -130,16 +130,16 @@ void loop() {
 
   if (curHAL != lastHAL || curHBL != lastHBL || curHCL != lastHCL) {
     leftTicks.unshift({ // make most recent (index 0)
-	tickDirection(phaseOf(lastHAL, lastHBL, lastHCL), phaseOf(curHAL, curHBL, curHCL), true),
-	now
-      });
+      tickDirection(phaseOf(lastHAL, lastHBL, lastHCL), phaseOf(curHAL, curHBL, curHCL), true),
+      now
+    });
     updateSpeed(leftSpeed, leftTicks);
   }
   if (curHAR != lastHAR || curHBR != lastHBR || curHCR != lastHCR) {
     rightTicks.unshift({ // make most recent (index 0)
-	tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR)),
-	now
-      });
+      tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR)),
+      now
+    });
     updateSpeed(rightSpeed, rightTicks);
   }
 
@@ -154,7 +154,7 @@ void loop() {
   lastHBR = curHBR;
   lastHCR = curHCR;
 
-  if (now > lastPrint + 1000000UL/5UL) {
+  if (now > lastPrint + 1000000UL / 5UL) {
     printData();
     lastPrint = now;
   }
@@ -216,8 +216,8 @@ void serialEvent() {
     csv.trim();
     int commaIndex = csv.indexOf(",");
     targetLeftSpeed = csv.substring(0, commaIndex).toInt();
-    targetRightSpeed = csv.substring(commaIndex+1).toInt();
-    killTime = micros() + 250UL*1000UL;
+    targetRightSpeed = csv.substring(commaIndex + 1).toInt();
+    killTime = micros() + 250UL * 1000UL;
   } else {
     killTime = 0;
   }
