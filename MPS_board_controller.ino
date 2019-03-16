@@ -174,16 +174,16 @@ int targetRightSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
-float k = 0.004;
+float k = 0.001;
 
 float epsilon = 0.01;
 
 void setPWM(float &pwm, const int &targetSpeed, float &currentSpeed, bool &spike) {
-  if (currentSpeed < epsilon) {
-    pwm = SPIKE_PWM;
+  if (currentSpeed < abs(epsilon)) {
+    pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
     spike = true;
-  } else if (spike == true && pwm == SPIKE_PWM) {
-    pwm = LOW_PWM;
+  } else if (spike == true && pwm == SPIKE_PWM || pwm == -SPIKE_PWM) {
+    pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
     spike = false;
   } else if (abs(targetSpeed - currentSpeed) > epsilon) {
     pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
