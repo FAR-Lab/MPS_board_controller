@@ -16,6 +16,8 @@
 #define HBR (A4) // (blue)
 #define HCR (A5) // (green)
 
+#define MIL (20)
+
 //#define MA (A5)
 //#define MB (A4)
 //#define MC (A3)
@@ -29,7 +31,7 @@ struct PhaseTransition {
   unsigned long time;
 };
 
-typedef CircularBuffer<const PhaseTransition, 5> TickBuffer;
+typedef CircularBuffer<PhaseTransition, 5> TickBuffer;
 
 void setup() {
   // put your setup code here, to run once:
@@ -60,13 +62,13 @@ void setup() {
 bool lastHAL, lastHBL, lastHCL,
      lastHAR, lastHBR, lastHCR;
 
-float leftSpeed = 0; // ticks / second
-float rightSpeed = 0; // ticks / second
+long leftSpeed_e6 = 0; // ticks / second
+long rightSpeed_e6 = 0; // ticks / second
 
 TickBuffer leftTicks;
 TickBuffer rightTicks;
 
-float updateRate = 0;
+long updateRate = 0;
 unsigned long lastUpdate = 0;
 unsigned long lastPrint = 0;
 
@@ -74,7 +76,7 @@ unsigned long killTime = 0;
 
 #define DEAD_TIME (100000UL)
 
-void updateSpeed(float &speed, TickBuffer &ticks) {
+void updateSpeed(long &speed, TickBuffer &ticks) {
   if (ticks.size() == 0) {
     speed = 0;
   }
@@ -84,7 +86,7 @@ void updateSpeed(float &speed, TickBuffer &ticks) {
   if (ticks.size() >= 2) {
     unsigned long dt = ticks[0].time - ticks[1].time;
     if (ticks[0].direction == ticks[1].direction && dt < DEAD_TIME) {
-      speed = ticks[0].direction * 1000000.0 / dt;
+      speed = (ticks[0].direction * 1000000L / dt) << MIL;
     } else {
       speed = 0;
     }
@@ -128,24 +130,36 @@ void loop() {
        curHBR = digitalRead(HBR),
        curHCR = digitalRead(HCR);
 
+//  unsigned long t1 = micros();
+
   if (curHAL != lastHAL || curHBL != lastHBL || curHCL != lastHCL) {
     leftTicks.unshift({ // make most recent (index 0)
       tickDirection(phaseOf(lastHAL, lastHBL, lastHCL), phaseOf(curHAL, curHBL, curHCL), true),
       now
     });
-    updateSpeed(leftSpeed, leftTicks);
+    updateSpeed(leftSpeed_e6, leftTicks);
   }
+
+//  unsigned long t2 = micros();
+  
   if (curHAR != lastHAR || curHBR != lastHBR || curHCR != lastHCR) {
     rightTicks.unshift({ // make most recent (index 0)
       tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR)),
       now
     });
-    updateSpeed(rightSpeed, rightTicks);
+    updateSpeed(rightSpeed_e6, rightTicks);
   }
 
+//  unsigned long t3 = micros();
+  
   setMotorPWM();
 
-  updateRate = 0.9 * updateRate + 0.1 * (1000000 / (now - lastUpdate));
+//  unsigned long t4 = micros();
+
+  updateRate = ((updateRate << 4) - updateRate + (now-lastUpdate)) >> 4;
+
+//  unsigned long t5 = micros();
+
   lastUpdate = now;
   lastHAL = curHAL;
   lastHBL = curHBL;
@@ -154,60 +168,74 @@ void loop() {
   lastHBR = curHBR;
   lastHCR = curHCR;
 
+//  unsigned long t6 = micros();
+
   if (now > lastPrint + 1000000UL / 5UL) {
     printData();
     lastPrint = now;
+//    Serial.print(t1-now);
+//    Serial.print('\t');
+//    Serial.print(t2-t1);
+//    Serial.print('\t');
+//    Serial.print(t3-t2);
+//    Serial.print('\t');
+//    Serial.print(t4-t3);
+//    Serial.print('\t');
+//    Serial.print(t5-t4);
+//    Serial.print('\t');
+//    Serial.println(t6-t5);
   }
 
   checkKillTime();
 }
 
-#define MAX_PWM (255)
-#define SPIKE_PWM (220)
-#define LOW_PWM (120)
+#define MAX_PWM (255<<MIL)
+#define SPIKE_PWM (220<<MIL)
+#define LOW_PWM (120<<MIL)
 
 bool leftSpike = false;
 bool rightSpike = false;
 
-int targetLeftSpeed = 0;
-int targetRightSpeed = 0;
+long targetLeftSpeed_e6 = 0;
+long targetRightSpeed_e6 = 0;
 
-float leftPWM = 0;
-float rightPWM = 0;
-float k = 0.004;
+long leftPWM_e6 = 0;
+long rightPWM_e6 = 0;
+int kInverse = 8; // factor of 256;
 
-float epsilon = 0.01;
+int epsilon = 100;
 
-void setPWM(float &pwm, const int &targetSpeed, float &currentSpeed, bool &spike) {
-  if (currentSpeed < epsilon) {
-    pwm = SPIKE_PWM;
+void setPWM(long &pwm, const int &targetSpeed, long &currentSpeed, bool &spike) {
+  if (abs(currentSpeed) < epsilon) {
+    pwm = targetSpeed > 0 ? SPIKE_PWM : -SPIKE_PWM;
     spike = true;
-  } else if (spike == true && pwm == SPIKE_PWM) {
-    pwm = LOW_PWM;
+  } else if (spike == true && (pwm == SPIKE_PWM || pwm == -SPIKE_PWM)) {
+    pwm = pwm > 0 ? LOW_PWM : -LOW_PWM;
     spike = false;
   } else if (abs(targetSpeed - currentSpeed) > epsilon) {
-    pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
+    pwm = constrain(pwm + (targetSpeed - currentSpeed) >> kInverse, -MAX_PWM, MAX_PWM);
   }
 }
 
 void setMotorPWM() {
-  if (abs(targetLeftSpeed) > epsilon || abs(targetRightSpeed) > epsilon) {
-    setPWM(leftPWM, targetLeftSpeed, leftSpeed, leftSpike);
-    setPWM(rightPWM, targetRightSpeed, rightSpeed, rightSpike);
-    // leftPWM = abs(targetLeftSpeed);
-    // rightPWM = abs(targetRightSpeed);
+  if (abs(targetLeftSpeed_e6) > epsilon || abs(targetRightSpeed_e6) > epsilon) {
+    setPWM(leftPWM_e6, targetLeftSpeed_e6, leftSpeed_e6, leftSpike);
+    setPWM(rightPWM_e6, targetRightSpeed_e6, rightSpeed_e6, rightSpike);
   } else {
-    leftPWM = rightPWM = 0;
+    leftPWM_e6 = rightPWM_e6 = 0;
   }
 
-  analogWrite(PWM_PIN_L, abs(leftPWM));
-  analogWrite(PWM_PIN_R, abs(rightPWM));
-  digitalWrite(DIR_PIN_L, leftPWM < 0 ? HIGH : LOW);
-  digitalWrite(DIR_PIN_R, rightPWM < 0 ? LOW : HIGH);
-  digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
-  digitalWrite(BRAKE_PIN_R, abs(rightPWM) > epsilon ? HIGH : LOW);
+  analogWrite(PWM_PIN_L, abs(leftPWM_e6 >> MIL));
+  analogWrite(PWM_PIN_R, abs(rightPWM_e6 >> MIL));
+  digitalWrite(DIR_PIN_L, leftPWM_e6 < 0 ? HIGH : LOW);
+  digitalWrite(DIR_PIN_R, rightPWM_e6 < 0 ? LOW : HIGH);
+  digitalWrite(BRAKE_PIN_L, abs(leftPWM_e6) > epsilon ? HIGH : LOW);
+  digitalWrite(BRAKE_PIN_R, abs(rightPWM_e6) > epsilon ? HIGH : LOW);
 }
 
+void serialEventRun() {
+  if (Serial.available()) serialEvent();
+}
 void serialEvent() {
   String input = Serial.readStringUntil('\n');
 
@@ -215,8 +243,8 @@ void serialEvent() {
     String csv = input.substring(1);
     csv.trim();
     int commaIndex = csv.indexOf(",");
-    targetLeftSpeed = csv.substring(0, commaIndex).toInt();
-    targetRightSpeed = csv.substring(commaIndex + 1).toInt();
+    targetLeftSpeed_e6 = csv.substring(0, commaIndex).toInt() << MIL;
+    targetRightSpeed_e6 = csv.substring(commaIndex + 1).toInt() << MIL;
     killTime = micros() + 250UL * 1000UL;
   } else {
     killTime = 0;
@@ -251,31 +279,31 @@ void serialEvent() {
   if (input[0] >= '0' && input[0] <= '9') {
     int i = input.toInt();
     if (i < 30) {
-      targetLeftSpeed = targetRightSpeed = 0;
+      targetLeftSpeed_e6 = targetRightSpeed_e6 = 0;
     } else {
-      targetLeftSpeed = targetRightSpeed = constrain(i, 30, MAX_PWM);
+      targetLeftSpeed_e6 = targetRightSpeed_e6 = constrain(i << MIL, 30 << MIL, MAX_PWM);
     }
     Serial.print("SPEED ");
-    Serial.println(targetLeftSpeed);
+    Serial.println(targetLeftSpeed_e6 >> MIL);
   }
 }
 
 void checkKillTime() {
   if (killTime > 0 && micros() > killTime) {
-    targetLeftSpeed = targetRightSpeed = 0;
+    targetLeftSpeed_e6 = targetRightSpeed_e6 = 0;
   }
 }
 
 void printData() {
-  Serial.print(leftSpeed);
+  Serial.print(leftSpeed_e6 >> MIL);
   Serial.print(",");
-  Serial.print(rightSpeed);
+  Serial.print(rightSpeed_e6 >> MIL);
   Serial.print(",");
-  Serial.print(updateRate);
+  Serial.print(leftPWM_e6 >> MIL);
   Serial.print(",");
-  Serial.print(leftPWM);
+  Serial.print(rightPWM_e6 >> MIL);
   Serial.print(",");
-  Serial.print(rightPWM);
+  Serial.print(1000000 / updateRate);
 
   Serial.println();
 }
