@@ -1,12 +1,22 @@
 #include <CircularBuffer.h>
 
-#define DIR_PIN_R (2)
-#define PWM_PIN_R (3)
-#define BRAKE_PIN_R (4)
+#ifdef SWAP_LR
+  #define DIR_PIN_L (2)
+  #define PWM_PIN_L (3)
+  #define BRAKE_PIN_L (4)
 
-#define DIR_PIN_L (10)
-#define PWM_PIN_L (11)
-#define BRAKE_PIN_L (12)
+  #define DIR_PIN_R (10)
+  #define PWM_PIN_R (11)
+  #define BRAKE_PIN_R (12)
+#else
+  #define DIR_PIN_R (2)
+  #define PWM_PIN_R (3)
+  #define BRAKE_PIN_R (4)
+
+  #define DIR_PIN_L (10)
+  #define PWM_PIN_L (11)
+  #define BRAKE_PIN_L (12)
+#endif
 
 
 #define HAL (A0) // (yellow)
@@ -52,7 +62,7 @@ void setup() {
   // from https://etechnophiles.com/change-frequency-pwm-pins-arduino-uno/
   // default is 500
   // TCCR2B = TCCR2B & B11111000 | B00000001; // for PWM frequency of 31372.55 Hz
-  // TCCR2B = TCCR2B & B11111000 | B00000010; // for PWM frequency of 3921.16 Hz
+  TCCR2B = TCCR2B & B11111000 | B00000010; // for PWM frequency of 3921.16 Hz
 
   // more info at https://www.arduino.cc/en/Tutorial/SecretsOfArduinoPWM
 }
@@ -72,9 +82,9 @@ unsigned long lastPrint = 0;
 
 unsigned long killTime = 0;
 
-#define DEAD_TIME (100000UL)
+#define DEAD_TIME (1000000UL)
 
-void updateSpeed(long &speed, TickBuffer &ticks) {
+void updateSpeed(const unsigned long now, long &speed, TickBuffer &ticks) {
   if (ticks.size() == 0) {
     speed = 0;
   }
@@ -82,9 +92,9 @@ void updateSpeed(long &speed, TickBuffer &ticks) {
     speed = 0;
   }
   if (ticks.size() >= 2) {
-    unsigned long dt = ticks[0].time - ticks[1].time;
-    if (ticks[0].direction == ticks[1].direction && dt < DEAD_TIME) {
-      speed = ticks[0].direction * 10000000 / dt;
+    long dt = ticks[0].time - ticks[1].time;
+    if (ticks[0].direction == ticks[1].direction && dt < DEAD_TIME && now - ticks[0].time < DEAD_TIME) {
+      speed = ticks[0].direction * 10000000L / dt;
     } else {
       speed = 0;
     }
@@ -119,10 +129,16 @@ int tickDirection(const phase &lastPhase, const phase &curPhase, bool invert = f
   }
 }
 
+// #define PERFTEST
+
 void loop() {
-  unsigned long t[6];
-  
-  unsigned long now = t[0] = micros();
+  unsigned long now = micros();
+
+  #ifdef PERFTEST
+    unsigned long t[6];
+    t[0] = now;
+  #endif
+
   bool curHAL = digitalRead(HAL),
        curHBL = digitalRead(HBL),
        curHCL = digitalRead(HCL),
@@ -130,36 +146,46 @@ void loop() {
        curHBR = digitalRead(HBR),
        curHCR = digitalRead(HCR);
 
-  t[1] = micros();
+  #ifdef PERFTEST
+    t[1] = micros();
+  #endif
 
   if (curHAL != lastHAL || curHBL != lastHBL || curHCL != lastHCL) {
     leftTicks.unshift({ // make most recent (index 0)
-      tickDirection(phaseOf(lastHAL, lastHBL, lastHCL), phaseOf(curHAL, curHBL, curHCL), true),
+      tickDirection(phaseOf(lastHAL, lastHBL, lastHCL), phaseOf(curHAL, curHBL, curHCL), false),
       now
     });
-    updateSpeed(leftSpeed, leftTicks);
   }
+  updateSpeed(now, leftSpeed, leftTicks);
 
-  t[2] = micros();
+  #ifdef PERFTEST
+    t[2] = micros();
+  #endif
   
   if (curHAR != lastHAR || curHBR != lastHBR || curHCR != lastHCR) {
     rightTicks.unshift({ // make most recent (index 0)
-      tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR)),
+	tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR), true),
       now
     });
-    updateSpeed(rightSpeed, rightTicks);
   }
+  updateSpeed(now, rightSpeed, rightTicks);
 
-  t[3] = micros();
-  
+  #ifdef PERFTEST
+    t[3] = micros();
+  #endif
+    
   setMotorPWM();
 
-  t[4] = micros();
-
+  #ifdef PERFTEST
+    t[4] = micros();
+  #endif
+    
   updateRate = ((updateRate << 3) - updateRate + (now - lastUpdate)) >> 3;
 
-  t[5] = micros();
-  
+  #ifdef PERFTEST
+    t[5] = micros();
+  #endif
+    
   lastUpdate = now;
   lastHAL = curHAL;
   lastHBL = curHBL;
@@ -171,19 +197,21 @@ void loop() {
   if (now > lastPrint + 200000UL) {
     printData(now);
     lastPrint = now;
-    for (int i = 1; i < sizeof(t); i++) {
-      Serial.print(",");
-      Serial.print(t[i] - t[i-1]);
-    }
-    Serial.println();
+    #ifdef PERFTEST
+      for (int i = 1; i < sizeof(t); i++) {
+        Serial.print(",");
+        Serial.print(t[i] - t[i-1]);
+      }
+      Serial.println();
+    #endif
   }
 
   checkKillTime();
 }
 
 #define MAX_PWM (255)
-#define SPIKE_PWM (220)
-#define LOW_PWM (120)
+#define SPIKE_PWM (200)
+#define LOW_PWM (30)
 
 bool leftSpike = false;
 bool rightSpike = false;
@@ -193,20 +221,20 @@ long targetRightSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
-float k = 0.001;
+float k = 0.0002;
 
 float epsilon = 0.01;
 
 void setPWM(float &pwm, const long &targetSpeed, long &currentSpeed, bool &spike) {
-//  if (currentSpeed < abs(epsilon)) {
-//    pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
-//    spike = true;
-//  } else if (spike == true && pwm == SPIKE_PWM || pwm == -SPIKE_PWM) {
-//    pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
-//    spike = false;
-//  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
+  if (abs(currentSpeed) < epsilon) {
+    pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
+    spike = true;
+  } else if (spike == true) {
+    pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
+    spike = false;
+  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
     pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
-//  }
+  }
 }
 
 void setMotorPWM() {
@@ -234,8 +262,8 @@ void serialEvent() {
     String csv = input.substring(1);
     csv.trim();
     int commaIndex = csv.indexOf(",");
-    targetLeftSpeed = csv.substring(0, commaIndex).toInt();
-    targetRightSpeed = csv.substring(commaIndex + 1).toInt();
+    targetLeftSpeed = -10*csv.substring(0, commaIndex).toInt();
+    targetRightSpeed = -10*csv.substring(commaIndex + 1).toInt();
     killTime = micros() + 250UL * 1000UL;
   } else {
     killTime = 0;
@@ -272,7 +300,7 @@ void serialEvent() {
     if (i < 30) {
       targetLeftSpeed = targetRightSpeed = 0;
     } else {
-      targetLeftSpeed = targetRightSpeed = constrain(i, 300, 1000);
+      targetLeftSpeed = targetRightSpeed = constrain(i, 30, 1000);
     }
     Serial.print("SPEED ");
     Serial.println(targetLeftSpeed);
@@ -293,8 +321,12 @@ void checkKillTime() {
 void printData(unsigned long start) {
   unsigned long now = micros();
   Serial.print(leftSpeed);
+  Serial.print("/");
+  Serial.print(targetLeftSpeed);
   Serial.print(",");
   Serial.print(rightSpeed);
+  Serial.print("/");
+  Serial.print(targetRightSpeed);
   Serial.print(",");
   Serial.print(leftPWM);
   Serial.print(",");
