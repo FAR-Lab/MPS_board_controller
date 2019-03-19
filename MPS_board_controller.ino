@@ -29,7 +29,7 @@ struct PhaseTransition {
   unsigned long time;
 };
 
-typedef CircularBuffer<const PhaseTransition, 5> TickBuffer;
+typedef CircularBuffer<PhaseTransition, 5> TickBuffer;
 
 void setup() {
   // put your setup code here, to run once:
@@ -60,13 +60,13 @@ void setup() {
 bool lastHAL, lastHBL, lastHCL,
      lastHAR, lastHBR, lastHCR;
 
-float leftSpeed = 0; // ticks / second
-float rightSpeed = 0; // ticks / second
+long leftSpeed = 0; // ticks / 10 second
+long rightSpeed = 0; // ticks / 10 second
 
 TickBuffer leftTicks;
 TickBuffer rightTicks;
 
-float updateRate = 0;
+long updateRate = 0;
 unsigned long lastUpdate = 0;
 unsigned long lastPrint = 0;
 
@@ -74,7 +74,7 @@ unsigned long killTime = 0;
 
 #define DEAD_TIME (100000UL)
 
-void updateSpeed(float &speed, TickBuffer &ticks) {
+void updateSpeed(long &speed, TickBuffer &ticks) {
   if (ticks.size() == 0) {
     speed = 0;
   }
@@ -84,7 +84,7 @@ void updateSpeed(float &speed, TickBuffer &ticks) {
   if (ticks.size() >= 2) {
     unsigned long dt = ticks[0].time - ticks[1].time;
     if (ticks[0].direction == ticks[1].direction && dt < DEAD_TIME) {
-      speed = ticks[0].direction * 1000000.0 / dt;
+      speed = ticks[0].direction * 10000000 / dt;
     } else {
       speed = 0;
     }
@@ -92,7 +92,7 @@ void updateSpeed(float &speed, TickBuffer &ticks) {
 }
 
 void setMotorPWM();
-void printData();
+void printData(unsigned long);
 void checkKillTime();
 
 // based on commutator tables. maps byte from index [HC][HB][HA] to phase number.
@@ -120,13 +120,17 @@ int tickDirection(const phase &lastPhase, const phase &curPhase, bool invert = f
 }
 
 void loop() {
-  unsigned long now = micros();
+  unsigned long t[6];
+  
+  unsigned long now = t[0] = micros();
   bool curHAL = digitalRead(HAL),
        curHBL = digitalRead(HBL),
        curHCL = digitalRead(HCL),
        curHAR = digitalRead(HAR),
        curHBR = digitalRead(HBR),
        curHCR = digitalRead(HCR);
+
+  t[1] = micros();
 
   if (curHAL != lastHAL || curHBL != lastHBL || curHCL != lastHCL) {
     leftTicks.unshift({ // make most recent (index 0)
@@ -135,6 +139,9 @@ void loop() {
     });
     updateSpeed(leftSpeed, leftTicks);
   }
+
+  t[2] = micros();
+  
   if (curHAR != lastHAR || curHBR != lastHBR || curHCR != lastHCR) {
     rightTicks.unshift({ // make most recent (index 0)
       tickDirection(phaseOf(lastHAR, lastHBR, lastHCR), phaseOf(curHAR, curHBR, curHCR)),
@@ -143,9 +150,16 @@ void loop() {
     updateSpeed(rightSpeed, rightTicks);
   }
 
+  t[3] = micros();
+  
   setMotorPWM();
 
-  updateRate = 0.9 * updateRate + 0.1 * (1000000 / (now - lastUpdate));
+  t[4] = micros();
+
+  updateRate = ((updateRate << 3) - updateRate + (now - lastUpdate)) >> 3;
+
+  t[5] = micros();
+  
   lastUpdate = now;
   lastHAL = curHAL;
   lastHBL = curHBL;
@@ -154,9 +168,14 @@ void loop() {
   lastHBR = curHBR;
   lastHCR = curHCR;
 
-  if (now > lastPrint + 1000000UL / 5UL) {
-    printData();
+  if (now > lastPrint + 200000UL) {
+    printData(now);
     lastPrint = now;
+    for (int i = 1; i < sizeof(t); i++) {
+      Serial.print(",");
+      Serial.print(t[i] - t[i-1]);
+    }
+    Serial.println();
   }
 
   checkKillTime();
@@ -169,8 +188,8 @@ void loop() {
 bool leftSpike = false;
 bool rightSpike = false;
 
-int targetLeftSpeed = 0;
-int targetRightSpeed = 0;
+long targetLeftSpeed = 0;
+long targetRightSpeed = 0;
 
 float leftPWM = 0;
 float rightPWM = 0;
@@ -178,16 +197,16 @@ float k = 0.001;
 
 float epsilon = 0.01;
 
-void setPWM(float &pwm, const int &targetSpeed, float &currentSpeed, bool &spike) {
-  if (currentSpeed < abs(epsilon)) {
-    pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
-    spike = true;
-  } else if (spike == true && pwm == SPIKE_PWM || pwm == -SPIKE_PWM) {
-    pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
-    spike = false;
-  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
+void setPWM(float &pwm, const long &targetSpeed, long &currentSpeed, bool &spike) {
+//  if (currentSpeed < abs(epsilon)) {
+//    pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
+//    spike = true;
+//  } else if (spike == true && pwm == SPIKE_PWM || pwm == -SPIKE_PWM) {
+//    pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
+//    spike = false;
+//  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
     pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
-  }
+//  }
 }
 
 void setMotorPWM() {
@@ -253,10 +272,15 @@ void serialEvent() {
     if (i < 30) {
       targetLeftSpeed = targetRightSpeed = 0;
     } else {
-      targetLeftSpeed = targetRightSpeed = constrain(i, 30, MAX_PWM);
+      targetLeftSpeed = targetRightSpeed = constrain(i, 300, 1000);
     }
     Serial.print("SPEED ");
     Serial.println(targetLeftSpeed);
+  }
+}
+void serialEventRun() {
+  if (Serial.available()) { 
+    serialEvent();
   }
 }
 
@@ -266,16 +290,19 @@ void checkKillTime() {
   }
 }
 
-void printData() {
+void printData(unsigned long start) {
+  unsigned long now = micros();
   Serial.print(leftSpeed);
   Serial.print(",");
   Serial.print(rightSpeed);
   Serial.print(",");
-  Serial.print(updateRate);
-  Serial.print(",");
   Serial.print(leftPWM);
   Serial.print(",");
   Serial.print(rightPWM);
+  Serial.print(",");
+  Serial.print(now - start);
+  Serial.print(",");
+  Serial.print(1000000 / updateRate);
 
   Serial.println();
 }
