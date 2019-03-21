@@ -1,22 +1,34 @@
 #include <CircularBuffer.h>
 
-#ifdef SWAP_LR
-  #define DIR_PIN_L (2)
-  #define PWM_PIN_L (3)
-  #define BRAKE_PIN_L (4)
 
-  #define DIR_PIN_R (10)
-  #define PWM_PIN_R (11)
-  #define BRAKE_PIN_R (12)
-#else
-  #define DIR_PIN_R (2)
-  #define PWM_PIN_R (3)
-  #define BRAKE_PIN_R (4)
+// #define SWAP_PWM
+// #undef USE_DIR_PWM
 
-  #define DIR_PIN_L (10)
-  #define PWM_PIN_L (11)
-  #define BRAKE_PIN_L (12)
-#endif
+// #ifdef SWAP_LR
+//   #define DIR_PIN_L (2)
+//   #define PWM_PIN_L (3)
+//   #define BRAKE_PIN_L (4)
+
+//   #define DIR_PIN_R (10)
+//   #define PWM_PIN_R (11)
+//   #define BRAKE_PIN_R (12)
+// #elifdef SWAP_PWM
+  #define DIR_PIN_L (3)
+  #define PWM_PIN_L (5)
+  #define BRAKE_PIN_L (6)
+
+  #define DIR_PIN_R (11)
+  #define PWM_PIN_R (9)
+  #define BRAKE_PIN_R (10)
+// #else
+//   #define DIR_PIN_R (2)
+//   #define PWM_PIN_R (3)
+//   #define BRAKE_PIN_R (4)
+
+//   #define DIR_PIN_L (10)
+//   #define PWM_PIN_L (11)
+//   #define BRAKE_PIN_L (12)
+// #endif
 
 
 #define HAL (A0) // (yellow)
@@ -62,7 +74,7 @@ void setup() {
   // from https://etechnophiles.com/change-frequency-pwm-pins-arduino-uno/
   // default is 500
   // TCCR2B = TCCR2B & B11111000 | B00000001; // for PWM frequency of 31372.55 Hz
-  TCCR2B = TCCR2B & B11111000 | B00000010; // for PWM frequency of 3921.16 Hz
+  // TCCR2B = TCCR2B & B11111000 | B00000010; // for PWM frequency of 3921.16 Hz
 
   // more info at https://www.arduino.cc/en/Tutorial/SecretsOfArduinoPWM
 }
@@ -247,12 +259,21 @@ void setMotorPWM() {
     leftPWM = rightPWM = 0;
   }
 
-  analogWrite(PWM_PIN_L, abs(leftPWM));
-  analogWrite(PWM_PIN_R, abs(rightPWM));
-  digitalWrite(DIR_PIN_L, leftPWM < 0 ? HIGH : LOW);
-  digitalWrite(DIR_PIN_R, rightPWM < 0 ? LOW : HIGH);
-  digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
-  digitalWrite(BRAKE_PIN_R, abs(rightPWM) > epsilon ? HIGH : LOW);
+// #ifdef USE_DIR_PWM
+  analogWrite(DIR_PIN_L, 127-leftPWM/8);
+  analogWrite(DIR_PIN_R, 127+rightPWM/8);
+  digitalWrite(BRAKE_PIN_L, HIGH);
+  digitalWrite(BRAKE_PIN_R, HIGH);
+  digitalWrite(PWM_PIN_L, HIGH);
+  digitalWrite(PWM_PIN_R, HIGH);
+// #else
+  // analogWrite(PWM_PIN_L, abs(leftPWM));
+  // analogWrite(PWM_PIN_R, abs(rightPWM));
+  // digitalWrite(DIR_PIN_L, leftPWM < 0 ? HIGH : LOW);
+  // digitalWrite(DIR_PIN_R, rightPWM < 0 ? LOW : HIGH);
+  // digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
+  // digitalWrite(BRAKE_PIN_R, abs(rightPWM) > epsilon ? HIGH : LOW);
+//#endif
 }
 
 void serialEvent() {
