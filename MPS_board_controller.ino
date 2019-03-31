@@ -101,7 +101,7 @@ void updateSpeed(const unsigned long now, long &speed, TickBuffer &ticks) {
   }
 }
 
-void setMotorPWM();
+void setMotorPWM(unsigned long);
 void printData(unsigned long);
 void checkKillTime();
 
@@ -174,7 +174,7 @@ void loop() {
     t[3] = micros();
   #endif
     
-  setMotorPWM();
+  setMotorPWM(now);
 
   #ifdef PERFTEST
     t[4] = micros();
@@ -220,37 +220,69 @@ long targetLeftSpeed = 0;
 long targetRightSpeed = 0;
 
 float leftPWM = 0;
+float leftSmooth = 1.0;
 float rightPWM = 0;
+float rightSmooth = 1.0;
 float k = 0.0002;
 
 float epsilon = 0.01;
 
-void setPWM(float &pwm, const long &targetSpeed, long &currentSpeed, bool &spike) {
+void setPWM(float &pwm, const long &targetSpeed, const long &currentSpeed, bool &spike) {
   if (abs(currentSpeed) < epsilon) {
     pwm = targetSpeed < 0 ? -SPIKE_PWM : SPIKE_PWM;
     spike = true;
   } else if (spike == true) {
     pwm = pwm < 0 ? -LOW_PWM : LOW_PWM;
     spike = false;
-  } else if (abs(targetSpeed - currentSpeed) > epsilon) {
+  } else {
     pwm = constrain(pwm + k * (targetSpeed - currentSpeed), -MAX_PWM, MAX_PWM);
   }
 }
 
-void setMotorPWM() {
+void setSmooth(float &smooth, const long &last_tick, const long &prev_tick,
+	       const bool &spike, const unsigned long &now) {
+  if (spike) {
+    smooth = 1.0;
+  } else {
+    const unsigned long since_last = now - last_tick;
+    const unsigned long last_interval = last_tick - prev_tick;
+    float frac = since_last / last_interval;
+    if (frac < 0.25) {
+      smooth = 4 * since_last / last_interval;
+    } else if (frac > 0.75) {
+      smooth = 1 - 4 * (last_interval - since_last) / last_interval;
+    } else {
+      smooth = 1.0;
+    }
+  }
+}
+
+
+void setMotorPWM(const unsigned long now) {
   if (abs(targetLeftSpeed) > epsilon || abs(targetRightSpeed) > epsilon) {
     setPWM(leftPWM, targetLeftSpeed, leftSpeed, leftSpike);
     setPWM(rightPWM, targetRightSpeed, rightSpeed, rightSpike);
+
+    // if (leftTicks.size() >= 2) {
+    //   setSmooth(leftSmooth, leftTicks[0].time, leftTicks[1].time, leftSpike, now);
+    // } else {
+    //   leftSmooth = 1.0;
+    // }
+    // if (rightTicks.size() >= 2) {
+    //   setSmooth(rightSmooth, rightTicks[0].time, rightTicks[1].time, rightSpike, now);
+    // } else {
+    //   rightSmooth = 1.0;
+    // }
     // leftPWM = abs(targetLeftSpeed);
     // rightPWM = abs(targetRightSpeed);
   } else {
     leftPWM = rightPWM = 0;
   }
 
-  analogWrite(PWM_PIN_L, abs(leftPWM));
-  analogWrite(PWM_PIN_R, abs(rightPWM));
-  digitalWrite(DIR_PIN_L, leftPWM < 0 ? HIGH : LOW);
-  digitalWrite(DIR_PIN_R, rightPWM < 0 ? LOW : HIGH);
+  analogWrite(PWM_PIN_L, leftSmooth * abs(leftPWM));
+  analogWrite(PWM_PIN_R, rightSmooth * abs(rightPWM));
+  digitalWrite(DIR_PIN_L, leftPWM > 0 ? HIGH : LOW);
+  digitalWrite(DIR_PIN_R, rightPWM > 0 ? LOW : HIGH);
   digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
   digitalWrite(BRAKE_PIN_R, abs(rightPWM) > epsilon ? HIGH : LOW);
 }
