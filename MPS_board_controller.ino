@@ -26,10 +26,6 @@
 #define HBR (A4) // (blue)
 #define HCR (A5) // (green)
 
-//#define MA (A5)
-//#define MB (A4)
-//#define MC (A3)
-
 typedef byte phase;
 
 struct PhaseTransition {
@@ -210,7 +206,7 @@ void loop() {
 }
 
 #define MAX_PWM (255)
-#define SPIKE_PWM (200)
+#define SPIKE_PWM (255)
 #define LOW_PWM (30)
 
 bool leftSpike = false;
@@ -223,7 +219,7 @@ float leftPWM = 0;
 float leftSmooth = 1.0;
 float rightPWM = 0;
 float rightSmooth = 1.0;
-float k = 0.0002;
+float k = 0.0003;
 
 float epsilon = 0.01;
 
@@ -279,8 +275,10 @@ void setMotorPWM(const unsigned long now) {
     leftPWM = rightPWM = 0;
   }
 
-  analogWrite(PWM_PIN_L, leftSmooth * abs(leftPWM));
-  analogWrite(PWM_PIN_R, rightSmooth * abs(rightPWM));
+  // analogWrite(PWM_PIN_L, leftSmooth * abs(leftPWM));
+  // analogWrite(PWM_PIN_R, rightSmooth * abs(rightPWM));
+  analogWrite(PWM_PIN_L, abs(leftPWM));
+  analogWrite(PWM_PIN_R, abs(rightPWM));
   digitalWrite(DIR_PIN_L, leftPWM > 0 ? HIGH : LOW);
   digitalWrite(DIR_PIN_R, rightPWM > 0 ? LOW : HIGH);
   digitalWrite(BRAKE_PIN_L, abs(leftPWM) > epsilon ? HIGH : LOW);
